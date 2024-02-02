@@ -6,8 +6,12 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.flowWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import dagger.hilt.android.AndroidEntryPoint
@@ -16,6 +20,7 @@ import dev.brahmkshatriya.echo.ui.adapters.MediaItemAdapter
 import dev.brahmkshatriya.echo.ui.adapters.MediaItemComparator
 import dev.brahmkshatriya.echo.ui.player.PlayerViewModel
 import dev.brahmkshatriya.echo.ui.utils.updateBottomMarginWithSystemInsets
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -37,11 +42,15 @@ class SearchFragment : Fragment() {
         }
         updateBottomMarginWithSystemInsets(binding.root)
 
+        searchViewModel.searchResults.observeFlow(viewLifecycleOwner) { pagingData ->
+            pagingData["Tracks"]?.collect { adapter.submitData(it) }
+        }
+
         binding.catSearchView.setupWithSearchBar(binding.catSearchBar)
         binding.catSearchView.editText.setOnEditorActionListener { textView, actionId, keyEvent ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH || keyEvent.keyCode == KeyEvent.KEYCODE_ENTER) {
                 textView.text.toString().ifBlank { null }?.let {
-                    observeSearchFlow(it)
+                    makeSearchQuery(it)
                     binding.catSearchView.hide()
                     return@setOnEditorActionListener true
                 }
@@ -53,11 +62,18 @@ class SearchFragment : Fragment() {
     }
 
     private val adapter = MediaItemAdapter(MediaItemComparator)
-    private fun observeSearchFlow(query: String) {
+    private fun makeSearchQuery(query: String) {
         lifecycleScope.launch {
-            searchViewModel.search(query).collectLatest { pagingData ->
-                (binding.catRecyclerView.adapter as MediaItemAdapter).submitData(pagingData)
-            }
+            searchViewModel.search(query)
         }
     }
 }
+
+
+fun <X> Flow<X>.observeFlow(lifecycleOwner: LifecycleOwner, callback: suspend (X) -> Unit) =
+    lifecycleOwner.lifecycleScope.launch {
+        flowWithLifecycle(
+            lifecycleOwner.lifecycle,
+            Lifecycle.State.STARTED
+        ).collect(callback)
+    }
